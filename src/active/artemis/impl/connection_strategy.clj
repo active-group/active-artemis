@@ -1,4 +1,47 @@
 (ns active.artemis.impl.connection-strategy
+  "# Producing Client Sessions
+
+  This namespace defines different strategies to connect to Apache Artemis,
+  a [[org.apache.activemq.artemis.api.core.client.ClientSession]].
+
+  The key function is the [[create-client-session]], which takes
+  a [[connection-strategy]] (see below) and
+  some [[authentication-credentials]] (see below) and attempts to connect to an
+  Artemis instance using the strategy and credentials. Upon a successfull
+  connection, it returns a [[client-session-state]] that tracks the state of you
+  session (see [[client-session-state]]).
+
+  ## Connection Strategy
+
+  A [[connection-strategy]] is one of the following:
+
+  * A plain [[strategy-remote-host]] that describes the attempt to connect to a
+  remote Artemis instance using a plain uri. Create such a strategy
+  via [[make-remote-host-strategy]].
+
+  * A more complex [[strategy-remote-host+port]] that describes the attempt to
+  connect to a remote Artemis instance using a specific host and port. Create
+  such a strategy via [[make-remote-host+port-strategy]].
+
+  * A [[strategy-same-vm]] the describes the attempt to connect to a local
+  Artemis instance runnig in the same VM as the producers/consumers. Create such
+  a strategy via [[make-same-vm-strategy]].
+
+  ## Authentication Credentials
+
+  A map that satisfies the [[authentication-credentials]] record type is one of
+  the following:
+
+  * [[no-credentials]]: Used for unauthenticated connections to a Apache Artemis
+  instance.
+  * [[username+password]]: Used for authentication via username and password in
+  authenticated connections to a Apache Artemis instance.
+
+  ## Note on Authentication
+
+  While the connection strategy is important for creating the client session
+  factory, the actual authentication happens at the level of creating
+  a [[ClientSession]] proper."
   (:require
    [active.data.realm :as realm]
    [active.data.record :as r])
@@ -17,7 +60,9 @@
   :extends connection-strategy
   [strategy-remote-host-uri :- realm/string])
 
-(defn make-remote-host-strategy [uri]
+(defn make-remote-host-strategy
+  "Takes a `uri` (string) and returns a [[strategy-remote-host]] for that `uri`."
+  [uri]
   (strategy-remote-host strategy-remote-host-uri uri))
 
 (r/def-record strategy-remote-host+port
@@ -25,13 +70,21 @@
   [strategy-remote-host+port-host :- realm/string
    strategy-remote-host+port-port :- realm/string])
 
-(defn make-remote-host+port-strategy [host port]
+(defn make-remote-host+port-strategy
+  "Takes a `host` and `port` (both strings) and returns
+  a [[strategy-remote-host+port]] for those values."
+  [host port]
   (strategy-remote-host+port strategy-remote-host+port-host host
                              strategy-remote-host+port-port port))
 
 (r/def-record strategy-same-vm
   :extends connection-strategy
   [strategy-same-vm-server-id :- realm/string])
+
+(defn make-same-vm-strategy
+  "Take a `server-id` (string) and returns a [[strategy-same-vm]]."
+  [server-id]
+  (strategy-same-vm strategy-same-vm-server-id server-id))
 
 ;; Authentication credentials
 (r/def-record authentication-credentials [])
@@ -61,20 +114,27 @@
   [client-session-state-get :- realm:client-session
    client-session-state-close! :- (realm/function -> realm/any)])
 
-(defn get-client-session-state [css]
-  (client-session-state-get css))
+(defn get-client-session-state
+  "Takes a [[client-session-state]] and returns the actual [[ClientSession]]."
+  ^ClientSession [client-session-state]
+  (client-session-state-get client-session-state))
 
-(defn close-client-session-state! [css]
-  ((client-session-state-close! css)))
+(defn close-client-session-state!
+  "Takes a [[client-session-state]] and closes it, cleaning up all resources."
+  [client-session-state]
+  ((client-session-state-close! client-session-state)))
 
-(defn- make-client-session-state [^ClientSession client-session ^ClientSessionFactory client-session-factory ^ServerLocator server-locator]
+(defn- make-client-session-state
+  "Create a new [[client-session-state]]."
+  [^ClientSession client-session ^ClientSessionFactory client-session-factory ^ServerLocator server-locator]
   (client-session-state client-session-state-get client-session
                         client-session-state-close! (fn []
                                                       (.close client-session)
                                                       (.close client-session-factory)
                                                       (.close server-locator))))
 
-(defn- create-remote-host-client-session [uri credentials]
+(defn- create-remote-host-client-session
+  [uri credentials]
   (let [^ServerLocator locator (ActiveMQClient/createServerLocator uri)
         ^ClientSessionFactory factory (.createSessionFactory locator)
         ^ClientSession client-session (if (r/is-a? username+password credentials)

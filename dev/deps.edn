@@ -1,5 +1,2 @@
 {:deps {com.monkeyprojects/monkey-jms {:mvn/version "0.3.1"}
-        de.active-group/active-logger {:mvn/version "0.16.4"}
-        de.active-group/active-data {:mvn/version "0.3.3"}
-        org.apache.activemq/artemis-core-client {:mvn/version "2.44.0"}}
- :paths ["src"]}
+        de.active-group/active-logger {:mvn/version "0.16.4"}}}

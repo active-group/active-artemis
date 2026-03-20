@@ -26,10 +26,10 @@
     (.start client-session)))
 
 (defn make-stop!
-  ;; FIXME (Marco): Also close the producer itself.
   [client-session-state]
-  (fn stop! []
-    (connection-strategy/close-client-session-state! client-session-state)))
+  (fn stop! [producer-ref]
+    (connection-strategy/close-client-session-state! client-session-state)
+    (.close producer-ref)))
 
 ;; TODO (Marco): Add clientId to identify our application for debugging/management.
 ;; SEE: https://artemis.apache.org/components/artemis/documentation/latest/core.html#identifying-your-client-application-for-management-and-debugging

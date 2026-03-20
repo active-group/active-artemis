@@ -28,13 +28,16 @@
         consumer2 (consumer-impl/make host+port
                                       credentials
                                       (consumer/make-consumer-configuration "active.news"
-                                                                            (partial screaming-message-handler "CONSUMER 2")))]
-    (producer/start! producer)
-    (consumer/start! consumer1)
-    (consumer/start! consumer2)
+                                                                            (partial screaming-message-handler "CONSUMER 2")))
+
+        producer-ref (producer/start! producer)
+        consumer-ref1 (consumer/start! consumer1)
+        consumer-ref2 (consumer/start! consumer2)]
     (producer/send-message! producer "Hi from AG-HQ")
     (producer/send-message! producer "A second message from me")
     (producer/send-message! producer "Going home now -- baba!")
-    (producer/stop! producer)
-    (consumer/stop! consumer1)
-    (consumer/stop! consumer2)))
+    (producer/stop! producer producer-ref)
+    (consumer/stop! consumer1 consumer-ref1)
+    (consumer/stop! consumer2 consumer-ref2)))
+
+(-main)

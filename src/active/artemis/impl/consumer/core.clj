@@ -40,9 +40,9 @@
       consumer)))
 
 (defn make-stop! [client-session-state]
-  ;; FIXME (Marco): Also close the consumer itself.
-  (fn []
-    (connection-strategy/close-client-session-state! client-session-state)))
+  (fn [consumer-ref]
+    (connection-strategy/close-client-session-state! client-session-state)
+    (.close consumer-ref)))
 
 (defn make [connection-strategy authentication-credentials consumer-configuration]
   (let [address (consumer/consumer-configuration-address consumer-configuration)
