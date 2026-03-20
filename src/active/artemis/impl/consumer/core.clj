@@ -19,6 +19,9 @@
 (defn- gen-queue-name [address]
   (str `active.artemis.impl.consumer.core "-" address "-" (gensym)))
 
+;; NOTE: We cannot receive messages 'directly' but have to define a queue where
+;; artemis can enqueue messages for us. We then take from the queue. The queue
+;; is configured to 'die' when the associated ClientSession is closed.
 (defn- create-queue!
   "A queue must be created before starting our handler."
   [^ClientSession client-session address queue-name]

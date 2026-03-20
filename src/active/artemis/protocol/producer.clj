@@ -51,8 +51,10 @@
 (def realm:message realm/string)
 (def realm:producer-ref realm/any)
 
+(declare producer)
+
 (r/def-record producer
-  [producer-send-message! :- (realm/function realm:message -> realm/any)
+  [producer-send-message! :- (realm/function realm:message -> (realm/delay producer))
    producer-start! :- (realm/function -> realm/any)
    producer-stop! :- (realm/function realm:producer-ref -> realm/any)])
 
@@ -65,9 +67,11 @@
             producer-stop! stop!))
 
 (defn send-message!
-  "Send a `message` for publication to the `producer`."
+  "Send a `message` for publication to the `producer`. Returns the
+  whole [[producer]]."
   [producer message]
-  ((producer-send-message! producer) message))
+  ((producer-send-message! producer) message)
+  producer)
 
 (defn start!
   "Start the `producer`. Returns a reference to the actual producer object, which

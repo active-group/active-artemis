@@ -33,9 +33,10 @@
         producer-ref (producer/start! producer)
         consumer-ref1 (consumer/start! consumer1)
         consumer-ref2 (consumer/start! consumer2)]
-    (producer/send-message! producer "Hi from AG-HQ")
-    (producer/send-message! producer "A second message from me")
-    (producer/send-message! producer "Going home now -- baba!")
+    (-> producer
+        (producer/send-message! "Hi from AG-HQ")
+        (producer/send-message! "A second message from me")
+        (producer/send-message! "Going home now -- baba!"))
     (producer/stop! producer producer-ref)
     (consumer/stop! consumer1 consumer-ref1)
     (consumer/stop! consumer2 consumer-ref2)))

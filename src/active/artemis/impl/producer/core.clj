@@ -11,7 +11,6 @@
    [active.artemis.impl.connection-strategy :as connection-strategy]
    [active.artemis.protocol.producer :as producer])
   (:import
-   [org.apache.activemq.artemis.api.core RoutingType]
    [org.apache.activemq.artemis.api.core.client ClientMessage ClientProducer ClientSession]))
 
 (defn- create-client-producer
