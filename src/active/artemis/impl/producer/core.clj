@@ -1,5 +1,12 @@
 (ns active.artemis.impl.producer.core
-  "In Artemis parlens, an 'address' is what you might think of as a 'topic'."
+  "Implementation of the [[active.artemis.protocol.producer/producer]] protocol,
+  connecting to an Apache Artemis instance using
+  a [[active.artemis.impl.connection-strategy/connection-strategy]] for
+  connection params and
+  [[active.artemis.impl.connection-strategy/authentication-credentials]] for
+  authentication if needed.
+
+  Create an instance of a producer that satisfies the protol via [[make]]"
   (:require
    [active.artemis.impl.connection-strategy :as connection-strategy]
    [active.artemis.protocol.producer :as producer])
@@ -7,11 +14,11 @@
    [org.apache.activemq.artemis.api.core RoutingType]
    [org.apache.activemq.artemis.api.core.client ClientMessage ClientProducer ClientSession]))
 
-(defn create-client-producer
+(defn- create-client-producer
   ^ClientProducer [^ClientSession client-session address]
   (.createProducer client-session address))
 
-(defn make-send-message!
+(defn- make-send-message!
   "Takes a started `client-sessions` and a `client-producer` and returns a
   function that sends messages using that producer to Artemis."
   [^ClientSession client-session ^ClientProducer client-producer]
@@ -20,12 +27,12 @@
       (.writeString (.getBodyBuffer message) message-content)
       (.send client-producer message))))
 
-(defn make-start!
+(defn- make-start!
   [^ClientSession client-session]
   (fn start! []
     (.start client-session)))
 
-(defn make-stop!
+(defn- make-stop!
   [client-session-state]
   (fn stop! [producer-ref]
     (connection-strategy/close-client-session-state! client-session-state)
@@ -35,7 +42,7 @@
 ;; SEE: https://artemis.apache.org/components/artemis/documentation/latest/core.html#identifying-your-client-application-for-management-and-debugging
 (defn make
   "Takes a [[active.artemis.impl.connection-strategy/connection-strategy]] and
-  a [[active.artemis.protocol.producer/producer]] and returns a
+  a [[active.artemis.protocol.producer/producer-configuration]] and returns a
   new [[active.artemis.protocol.producer/producer-impl]].
 
   `authentication-credentials` defines if and how authentication is performed

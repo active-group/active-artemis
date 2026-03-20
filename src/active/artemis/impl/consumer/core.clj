@@ -1,4 +1,12 @@
 (ns active.artemis.impl.consumer.core
+  "Implementation of the [[active.artemis.protocol.consumer/consumer]] protocol,
+  connecting to an Apache Artemis instance using
+  a [[active.artemis.impl.connection-strategy/connection-strategy]] for
+  connection params and
+  [[active.artemis.impl.connection-strategy/authentication-credentials]] for
+  authentication if needed.
+
+  Create an instance of a consumer that satisfies the protol via [[make]]."
   (:require
    [active.artemis.impl.connection-strategy :as connection-strategy]
    [active.artemis.protocol.consumer :as consumer])
@@ -26,7 +34,7 @@
          (catch Exception _e
            nil))))
 
-(defn make-start! [^ClientSession client-session address queue-name message-handler]
+(defn- make-start! [^ClientSession client-session address queue-name message-handler]
   (fn start! []
     (.start client-session)
     (create-queue! client-session address queue-name)
@@ -39,12 +47,19 @@
       (.setMessageHandler consumer handler)
       consumer)))
 
-(defn make-stop! [client-session-state]
+(defn- make-stop! [client-session-state]
   (fn [consumer-ref]
     (connection-strategy/close-client-session-state! client-session-state)
     (.close consumer-ref)))
 
-(defn make [connection-strategy authentication-credentials consumer-configuration]
+(defn make
+ "Takes a [[active.artemis.impl.connection-strategy/connection-strategy]] and
+  a [[active.artemis.protocol.consumer/consumer-configuration]] and returns a
+  new [[active.artemis.protocol.consumer/consumer-impl]].
+
+  `authentication-credentials` defines if and how authentication is performed
+  and must be a valid [[authentication-credentials]] map."
+  [connection-strategy authentication-credentials consumer-configuration]
   (let [address (consumer/consumer-configuration-address consumer-configuration)
         queue-name (gen-queue-name address)
         client-session-state (connection-strategy/create-client-session connection-strategy
