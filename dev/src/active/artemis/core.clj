@@ -5,10 +5,14 @@
    [active.artemis.impl.producer.core :as producer-impl]
    [active.artemis.protocol.consumer :as consumer]
    [active.artemis.protocol.producer :as producer]
-   [active.clojure.logger.event :as logger]))
+   [active.clojure.logger.event :as logger]
+   [clojure.string :as string]))
 
-(defn- echo-message-handler [message]
-  (logger/log-event! :info (logger/log-msg "Got message:" message)))
+(defn- echo-message-handler [label message]
+  (logger/log-event! :info (logger/log-msg label "got message:" message)))
+
+(defn- screaming-message-handler [label message]
+  (logger/log-event! :info (logger/log-msg label "got message:" (string/upper-case message))))
 
 (defn -main []
   (let [host+port (conn/make-remote-host-strategy "tcp://localhost:61616")
@@ -17,14 +21,20 @@
         producer (producer-impl/make host+port
                                      credentials
                                      (producer/make-producer-configuration "active.news"))
-        consumer (consumer-impl/make host+port
-                                     credentials
-                                     (consumer/make-consumer-configuration "active.news"
-                                                                           echo-message-handler))]
+        consumer1 (consumer-impl/make host+port
+                                      credentials
+                                      (consumer/make-consumer-configuration "active.news"
+                                                                            (partial echo-message-handler "CONSUMER 1")))
+        consumer2 (consumer-impl/make host+port
+                                      credentials
+                                      (consumer/make-consumer-configuration "active.news"
+                                                                            (partial screaming-message-handler "CONSUMER 2")))]
     (producer/start! producer)
-    (consumer/start! consumer)
+    (consumer/start! consumer1)
+    (consumer/start! consumer2)
     (producer/send-message! producer "Hi from AG-HQ")
     (producer/send-message! producer "A second message from me")
     (producer/send-message! producer "Going home now -- baba!")
     (producer/stop! producer)
-    (consumer/stop! consumer)))
+    (consumer/stop! consumer1)
+    (consumer/stop! consumer2)))

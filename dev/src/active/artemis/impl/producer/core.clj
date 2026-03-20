@@ -2,8 +2,7 @@
   "In Artemis parlens, an 'address' is what you might think of as a 'topic'."
   (:require
    [active.artemis.impl.connection-strategy :as connection-strategy]
-   [active.artemis.protocol.producer :as producer]
-   [active.clojure.logger.event :as logger])
+   [active.artemis.protocol.producer :as producer])
   (:import
    [org.apache.activemq.artemis.api.core RoutingType]
    [org.apache.activemq.artemis.api.core.client ClientMessage ClientProducer ClientSession]))
