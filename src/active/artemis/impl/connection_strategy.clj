@@ -23,10 +23,6 @@
   connect to a remote Artemis instance using a specific host and port. Create
   such a strategy via [[make-remote-host+port-strategy]].
 
-  * A [[strategy-same-vm]] the describes the attempt to connect to a local
-  Artemis instance runnig in the same VM as the producers/consumers. Create such
-  a strategy via [[make-same-vm-strategy]].
-
   ## Authentication Credentials
 
   A map that satisfies the [[authentication-credentials]] record type is one of
@@ -77,14 +73,15 @@
   (strategy-remote-host+port strategy-remote-host+port-host host
                              strategy-remote-host+port-port port))
 
-(r/def-record strategy-same-vm
-  :extends connection-strategy
-  [strategy-same-vm-server-id :- realm/string])
 
-(defn make-same-vm-strategy
-  "Take a `server-id` (string) and returns a [[strategy-same-vm]]."
-  [server-id]
-  (strategy-same-vm strategy-same-vm-server-id server-id))
+(r/def-record strategy-multi-remote-host+port
+  :extends connection-strategy
+  [strategy-multi-remote-host+port-configs :- (realm/sequence-of strategy-remote-host+port)])
+
+(defn make-multi-remote-host+port-strategy
+  [& remote-host+port-strategies]
+  (strategy-multi-remote-host+port strategy-multi-remote-host+port-configs
+                                   remote-host+port-strategies))
 
 ;; Authentication credentials
 (r/def-record authentication-credentials [])
@@ -133,20 +130,26 @@
                                                       (.close client-session-factory)
                                                       (.close server-locator))))
 
+;; Create a new client session from a factory and some credentials.
+(defn- create-client-session
+  ^ClientSession [^ClientSessionFactory client-session-factory authentication-credentials]
+  (if (r/is-a? username+password authentication-credentials)
+    (.createSession client-session-factory
+                    (username+password-username authentication-credentials)
+                    (username+password-password authentication-credentials)
+                    false
+                    true
+                    true
+                    false
+                    ActiveMQClient/DEFAULT_ACK_BATCH_SIZE)
+    (.createSession client-session-factory)))
+
 (defn- create-remote-host-client-session
   [uri credentials]
   (let [^ServerLocator locator (ActiveMQClient/createServerLocator uri)
         ^ClientSessionFactory factory (.createSessionFactory locator)
-        ^ClientSession client-session (if (r/is-a? username+password credentials)
-                                        (.createSession factory
-                                                        (username+password-username credentials)
-                                                        (username+password-password credentials)
-                                                        false
-                                                        true
-                                                        true
-                                                        false
-                                                        ActiveMQClient/DEFAULT_ACK_BATCH_SIZE)
-                                        (.createSession factory))]
+        ^ClientSession client-session (create-client-session factory
+                                                             credentials)]
     (make-client-session-state client-session factory locator)))
 
 (defn- create-remote-host+port-client-session
@@ -156,22 +159,28 @@
         ^TransportConfiguration transport-cfg (TransportConfiguration. (.getName NettyConnectorFactory) params)
         ^ServerLocator locator (ActiveMQClient/createServerLocatorWithoutHA (into-array [transport-cfg]))
         ^ClientSessionFactory factory (.createSessionFactory locator)
-        ^ClientSession client-session (if (r/is-a? username+password credentials)
-                                        (.createSession factory
-                                                        (username+password-username credentials)
-                                                        (username+password-password credentials)
-                                                        false
-                                                        true
-                                                        true
-                                                        false
-                                                        ActiveMQClient/DEFAULT_ACK_BATCH_SIZE)
-                                        (.createSession factory))]
+        ^ClientSession client-session (create-client-session factory
+                                                             credentials)]
     (make-client-session-state client-session factory locator)))
 
-#_(defn create-same-vm-client-session
-    [server-id credentials]
-    (let [params {"serverid" server-id}
-          transport-cfg (TransportConfiguration. (.getName InVMConnectorFacotry) params)]))
+;; NOTE: We make the assunmption that all host+port entries use the same
+;; credentials to connect to. Otherwise, we would need to work this out without
+;; the provided server locator. Let's see if we even need it.
+
+;; NOTE: The servers are tried in the sequence they appear in `host+port-seq`.
+(defn create-multi-remote-host+port-client-session
+  [host+port-seq credentials]
+  (let [transport-cfgs ;; TODO (Marco): Type hints.
+        (mapv (fn [host+port]
+                (TransportConfiguration. (.getName NettyConnectorFactory)
+                                         {"host" (strategy-remote-host+port-host host+port)
+                                          "port" (strategy-remote-host+port-port host+port)}))
+              host+port-seq)
+        ^ServerLocator locator (ActiveMQClient/createServerLocatorWithHA (into-array transport-cfgs))
+        ^ClientSessionFactory factory (.createSessionFactory locator)
+        ^ClientSession client-session (create-client-session factory
+                                                             credentials)]
+    (make-client-session-state client-session factory locator)))
 
 (defn create-client-session
   "Create a new [[ClientSession]] from one of the predefined strategies. Does NOT
@@ -191,8 +200,10 @@
                                             (strategy-remote-host+port-port connection-strategy)
                                             authentication-credentials)
 
-    (r/is-a? strategy-same-vm
+    (r/is-a? strategy-multi-remote-host+port
              connection-strategy)
-    #_(create-same-vm-client-session (strategy-same-vm-server-id connection-strategy)
-                                     credentials)
+    (create-multi-remote-host+port-client-session (strategy-multi-remote-host+port-configs connection-strategy)
+                                                  authentication-credentials)
+    
+    :else
     (throw (UnsupportedOperationException. "not implemented"))))
