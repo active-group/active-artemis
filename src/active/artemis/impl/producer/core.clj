@@ -26,6 +26,16 @@
       (.writeString (.getBodyBuffer message) message-content)
       (.send client-producer message))))
 
+(defn- make-send-poison-pill!
+  "Takes a started `client-sessions` and a `client-producer` and returns a
+  function that sends a poison pill to the configured topic, signaling all
+  consumers can stop listening on that address."
+  [^ClientSession client-session ^ClientProducer client-producer]
+  (fn send-poison-pill! []
+    (let [^ClientMessage message (.createMessage client-session false)]
+      (.putBooleanProperty message "isLastMessage" true)
+      (.send client-producer message))))
+
 (defn- make-start!
   [^ClientSession client-session]
   (fn start! []
@@ -54,5 +64,6 @@
                                                                 (producer/producer-configuration-address producer-configuration))]
     (producer/make (make-start! client-session)
                    (make-send-message! client-session client-producer)
+                   (make-send-poison-pill! client-session client-producer)
                    (make-stop! client-session-state))))
 

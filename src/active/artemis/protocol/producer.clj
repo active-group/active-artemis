@@ -55,14 +55,16 @@
 
 (r/def-record producer
   [producer-send-message! :- (realm/function realm:message -> (realm/delay producer))
+   producer-send-poison-pill! :- (realm/function -> (realm/delay producer))
    producer-start! :- (realm/function -> realm/any)
    producer-stop! :- (realm/function realm:producer-ref -> realm/any)])
 
 (defn make
   "Make a new [[producer]]. See [[producer]] for function signatures of the
   arguments."
-  [start! send-message! stop!]
+  [start! send-message! send-poinson-pill! stop!]
   (producer producer-send-message! send-message!
+            producer-send-poison-pill! send-poinson-pill!
             producer-start! start!
             producer-stop! stop!))
 
@@ -72,6 +74,13 @@
   [producer message]
   ((producer-send-message! producer) message)
   producer)
+
+(defn send-poison-pill!
+  "Send a poison pill to all consumers. A poison pill marks the last message from
+  this producer and allows consumers to signal that they are done listening on
+  this address and can be stopped."
+  [producer]
+  ((producer-send-poison-pill! producer)))
 
 (defn start!
   "Start the `producer`. Returns a reference to the actual producer object, which
