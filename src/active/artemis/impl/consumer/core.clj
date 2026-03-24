@@ -9,13 +9,14 @@
   Create an instance of a consumer that satisfies the protol via [[make]]."
   (:require
    [active.artemis.impl.connection-strategy :as connection-strategy]
-   [active.artemis.protocol.consumer :as consumer])
+   [active.artemis.protocol.consumer :as consumer]
+   [active.clojure.logger.event :as logger]
+   [clojure.core.async :as async])
   (:import
    [org.apache.activemq.artemis.api.core RoutingType]
    [org.apache.activemq.artemis.api.core QueueConfiguration]
    [org.apache.activemq.artemis.api.core.client MessageHandler]
-   [org.apache.activemq.artemis.api.core.client ClientConsumer ClientSession]
-   [java.util.concurrent CountDownLatch]))
+   [org.apache.activemq.artemis.api.core.client ClientConsumer ClientSession]))
 
 (defn- gen-queue-name [address]
   (str `active.artemis.impl.consumer.core "-" address "-" (gensym)))
@@ -41,34 +42,24 @@
          (catch Exception _e
            nil))))
 
-(defn- is-poison-pill? [message]
-  (and (.containsProperty message "isLastMessage")
-       (.getBooleanProperty message "isLastMessage")))
-
-(defn- make-start! [^ClientSession client-session address queue-name create-queue? message-handler]
-  (fn start! [wait-for-poison-pill?]
+(defn- make-start! [^ClientSession client-session address queue-name create-queue? message-ch]
+  (fn start! []
     (.start client-session)
     (when create-queue? (create-queue! client-session address queue-name))
     (let [^ClientConsumer consumer (.createConsumer client-session queue-name)
-          ^CountDownLatch maybe-completion-latch (when wait-for-poison-pill?
-                                                   (CountDownLatch. 1))
           handler (reify MessageHandler
                     (onMessage [_this msg]
-                      (let [body (.. msg getBodyBuffer readString)]
-                        (message-handler body)
-                        (when (and wait-for-poison-pill?
-                                   (is-poison-pill? msg))
-                          (.countDown maybe-completion-latch))
-                        (.acknowledge msg))))]
+                      (println msg)
+                      (when-not (async/offer! message-ch (consumer/make-message msg))
+                        (logger/log-event! :warning (format "Channel full, message %s dropped" msg)))))]
       (.setMessageHandler consumer handler)
-      (if wait-for-poison-pill?
-        [consumer maybe-completion-latch]
-        consumer))))
+      consumer)))
 
-(defn- make-stop! [client-session-state]
+(defn- make-stop! [client-session-state message-ch]
   (fn [consumer-ref]
     (connection-strategy/close-client-session-state! client-session-state)
-    (.close consumer-ref)))
+    (.close consumer-ref)
+    (async/close! message-ch)))
 
 (defn make
   "Takes a [[active.artemis.impl.connection-strategy/connection-strategy]] and
@@ -85,13 +76,16 @@
                      (gen-queue-name address))
         client-session-state (connection-strategy/create-client-session connection-strategy
                                                                         authentication-credentials)
-        ^ClientSession client-session (connection-strategy/get-client-session-state client-session-state)]
-    (consumer/make (make-start! client-session
+        ^ClientSession client-session (connection-strategy/get-client-session-state client-session-state)
+        message-ch (async/chan (consumer/consumer-configuration-buffer-size consumer-configuration))]
+    (consumer/make message-ch
+                   (make-start! client-session
                                 (consumer/consumer-configuration-address consumer-configuration)
                                 queue-name
                                 ;; NOTE: If there is no external queue
                                 ;; configured, instruct the start function to
                                 ;; create one when called.
                                 (not external-queue?)
-                                (consumer/consumer-configuration-message-handler consumer-configuration))
-                   (make-stop! client-session-state))))
+                                message-ch)
+                   (make-stop! client-session-state
+                               message-ch))))

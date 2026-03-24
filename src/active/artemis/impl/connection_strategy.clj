@@ -79,9 +79,9 @@
   [strategy-multi-remote-host+port-configs :- (realm/sequence-of strategy-remote-host+port)])
 
 (defn make-multi-remote-host+port-strategy
-  [& remote-host+port-strategies]
+  [& remote-host-strategies]
   (strategy-multi-remote-host+port strategy-multi-remote-host+port-configs
-                                   remote-host+port-strategies))
+                                   remote-host-strategies))
 
 ;; Authentication credentials
 (r/def-record authentication-credentials [])
@@ -131,7 +131,7 @@
                                                       (.close server-locator))))
 
 ;; Create a new client session from a factory and some credentials.
-(defn- create-client-session
+(defn- create-client-session-1
   ^ClientSession [^ClientSessionFactory client-session-factory authentication-credentials]
   (if (r/is-a? username+password authentication-credentials)
     (.createSession client-session-factory
@@ -148,8 +148,8 @@
   [uri credentials]
   (let [^ServerLocator locator (ActiveMQClient/createServerLocator uri)
         ^ClientSessionFactory factory (.createSessionFactory locator)
-        ^ClientSession client-session (create-client-session factory
-                                                             credentials)]
+        ^ClientSession client-session (create-client-session-1 factory
+                                                               credentials)]
     (make-client-session-state client-session factory locator)))
 
 (defn- create-remote-host+port-client-session
@@ -159,8 +159,8 @@
         ^TransportConfiguration transport-cfg (TransportConfiguration. (.getName NettyConnectorFactory) params)
         ^ServerLocator locator (ActiveMQClient/createServerLocatorWithoutHA (into-array [transport-cfg]))
         ^ClientSessionFactory factory (.createSessionFactory locator)
-        ^ClientSession client-session (create-client-session factory
-                                                             credentials)]
+        ^ClientSession client-session (create-client-session-1 factory
+                                                               credentials)]
     (make-client-session-state client-session factory locator)))
 
 ;; NOTE: We make the assunmption that all host+port entries use the same
@@ -178,8 +178,8 @@
               host+port-seq)
         ^ServerLocator locator (ActiveMQClient/createServerLocatorWithHA (into-array transport-cfgs))
         ^ClientSessionFactory factory (.createSessionFactory locator)
-        ^ClientSession client-session (create-client-session factory
-                                                             credentials)]
+        ^ClientSession client-session (create-client-session-1 factory
+                                                               credentials)]
     (make-client-session-state client-session factory locator)))
 
 (defn create-client-session

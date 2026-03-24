@@ -1,7 +1,14 @@
 services:
-  activemq-artemis:
+  activemq-artemis-live:
     image: apache/activemq-artemis:latest
-    container_name: 'activemq-artemis'
+    container_name: 'activemq-artemis-live'
     ports:
       - 61616:61616
       - 8161:8161
+
+  activemq-artemis-backup:
+    image: apache/activemq-artemis:latest
+    container_name: 'activemq-artemis-backup'
+    ports:
+      - 61617:61616
+      - 8162:8161

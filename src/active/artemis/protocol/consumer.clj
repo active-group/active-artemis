@@ -25,14 +25,15 @@
   * [[stop!]]: Stops the consumer and cleans up everything."
   (:require
    [active.data.realm :as realm]
-   [active.data.record :as r]))
+   [active.data.record :as r])
+#_  (:import
+   [clojure.core.async.impl.channels ManyToManyChannel]))
 
 (def realm:address realm/string)
-(def realm:routing-type (realm/enum ::anycast ::multicast))
 
 (r/def-record consumer-configuration
   [consumer-configuration-address :- realm:address
-   consumer-configuration-message-handler :- (realm/function realm/any -> realm/any)])
+   consumer-configuration-buffer-size :- realm/natural])
 
 (r/def-record consumer-configuration-with-external-queue
   :extends consumer-configuration
@@ -49,14 +50,15 @@
   waits for messages on a queue identified by the queue name. The caller must
   ensure the queue exists and get messages from artemis and clean it up
   afterwards."
-  [address callback & [{:keys [queue-name]
-                        :or {queue-name nil}}]]
+  [address & [{:keys [queue-name buffer-size]
+               :or {queue-name nil
+                    buffer-size 64}}]]
   (if (some? queue-name)
     (consumer-configuration-with-external-queue consumer-configuration-address address
-                                                consumer-configuration-message-handler callback
+                                                consumer-configuration-buffer-size buffer-size
                                                 consumer-configuration-external-queue-name queue-name)
     (consumer-configuration consumer-configuration-address address
-                            consumer-configuration-message-handler callback)))
+                            consumer-configuration-buffer-size buffer-size)))
 
 (defn consumer-configuration?
   "Is a `thing` a [[consumer-configuration]]?"
@@ -69,37 +71,56 @@
   (r/is-exactly-a? consumer-configuration-with-external-queue
                    thing))
 
+(r/def-record message
+  [message-body :- realm/string
+   message-acknowledge! :- (realm/function -> realm/any)])
+
+(defn make-message
+  "Takes an artemis message and wraps it into a [[message]] object."
+  [msg]
+  (let [body (.. msg getBodyBuffer readString)]
+    (message message-body body
+             message-acknowledge! (fn []
+                                    (.acknowledge msg)))))
+
+(defn mark-as-read!
+  "Mark a [[message]] as read."
+  [message]
+  ((message-acknowledge! message)))
+
 (def realm:consumer-ref realm/any)
+#_(def realm:chan (realm/from-predicate "Realm for [[clojure.core.async/chan]]s."
+                                      #(instance? ManyToManyChannel %)))
 
 (r/def-record consumer
-  [consumer-start! :- (realm/function -> realm/any)
+  [consumer-receiver-chan :- realm/any ; realm:chan
+   consumer-start! :- (realm/function -> realm/any)
    consumer-stop! :- (realm/function realm:consumer-ref -> realm/any)])
 
 (defn make
   "Make a new [[consumer]]. See [[consumer]] for function signatures of the
   arguments"
-  [start! stop!]
-  (consumer consumer-start! start!
+  [receiver-chan start! stop!]
+  (consumer consumer-receiver-chan receiver-chan
+            consumer-start! start!
             consumer-stop! stop!))
+
+(defn message-chan
+  "Get a handle on the `consumer`s receiver
+  chan (a [[clojure.core.async.impl.channels.ManyToManyChannel]])."
+  [consumer]
+  (consumer-receiver-chan consumer))
 
 (defn start!
   "Start the `consumer`. Returns a reference to the actual consumer object, which
   must be passed to [[stop!]] for cleanup of resources when you stop the
   consumer."
   [consumer]
-  ((consumer-start! consumer) false))
-
-(defn start-with-completion-latch!
-  "Start the `consumer`. Returns a tuple with a reference to the actual consumer
-  object, which must be passed to [[stop!]] for cleanup of resources when you
-  stop the consumer and a completion
-  latch (a [[java.util.concurrent.CountDownLatch]]) that allows the main thread
-  to wait for a completion message on that consumer before stopping it."
-  [consumer]
-  ((consumer-start! consumer) true))
+  ((consumer-start! consumer)))
 
 (defn stop!
   "Stop the `consumer`, cleaning up after `consumer-ref`. `consumer-ref` is the
   object you get by calling [[start!]] for the `consumer`."
   [consumer consumer-ref]
   ((consumer-stop! consumer) consumer-ref))
+
