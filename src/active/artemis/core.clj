@@ -30,9 +30,8 @@
                                                             "61616")
         host+port-backup (conn/make-remote-host+port-strategy "localhost"
                                                          "61617")
-        multi (conn/make-multi-remote-host+port-strategy
-               host+port-backup
-               host+port-live)
+        multi (conn/make-multi-strategy host+port-backup
+                                        host+port-live)
         
         credentials (conn/make-username+password-credentials "artemis"
                                                              "artemis")

@@ -49,7 +49,6 @@
     (let [^ClientConsumer consumer (.createConsumer client-session queue-name)
           handler (reify MessageHandler
                     (onMessage [_this msg]
-                      (println msg)
                       (when-not (async/offer! message-ch (consumer/make-message msg))
                         (logger/log-event! :warning (format "Channel full, message %s dropped" msg)))))]
       (.setMessageHandler consumer handler)

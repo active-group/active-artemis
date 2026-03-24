@@ -15,13 +15,17 @@
 
   A [[connection-strategy]] is one of the following:
 
-  * A plain [[strategy-remote-host]] that describes the attempt to connect to a
-  remote Artemis instance using a plain uri. Create such a strategy
-  via [[make-remote-host-strategy]].
+  * A [[strategy-remote-host+port]] that describes the attempt to connect to a
+  remote Artemis instance using a specific host and port. Create such a strategy
+  via [[make-remote-host+port-strategy]].
 
-  * A more complex [[strategy-remote-host+port]] that describes the attempt to
-  connect to a remote Artemis instance using a specific host and port. Create
-  such a strategy via [[make-remote-host+port-strategy]].
+  * A [[strategy-in-vm]], useful for connection to an Artemis instance that runs
+  in the same process as your producer/consumer. Identified by an id. Create
+  such a strategy via [[make-in-vm-strategy]].
+  
+  * A [[strategy-multi]] that consists of several (maybe nested)
+  strategies. That strategy is useful if you have multiple Artemis instances you
+  cant to listen/publish to at once.
 
   ## Authentication Credentials
 
@@ -48,18 +52,19 @@
     ClientSession
     ClientSessionFactory
     ServerLocator]
-   [org.apache.activemq.artemis.core.remoting.impl.netty NettyConnectorFactory]))
+   [org.apache.activemq.artemis.core.remoting.impl.invm InVMConnectorFactory]
+   [org.apache.activemq.artemis.core.remoting.impl.netty NettyConnectorFactory TransportConstants]))
 
 (r/def-record connection-strategy [])
 
-(r/def-record strategy-remote-host
+(r/def-record strategy-in-vm
   :extends connection-strategy
-  [strategy-remote-host-uri :- realm/string])
+  [strategy-in-vm-server-id :- (realm/union realm/string
+                                            realm/natural)])
 
-(defn make-remote-host-strategy
-  "Takes a `uri` (string) and returns a [[strategy-remote-host]] for that `uri`."
-  [uri]
-  (strategy-remote-host strategy-remote-host-uri uri))
+(defn make-in-vm-strategy
+  [server-id]
+  (strategy-in-vm strategy-in-vm-server-id server-id))
 
 (r/def-record strategy-remote-host+port
   :extends connection-strategy
@@ -74,14 +79,33 @@
                              strategy-remote-host+port-port port))
 
 
-(r/def-record strategy-multi-remote-host+port
+(r/def-record strategy-multi
   :extends connection-strategy
-  [strategy-multi-remote-host+port-configs :- (realm/sequence-of strategy-remote-host+port)])
+  [strategy-multi-strategies :- (realm/sequence-of connection-strategy)])
 
-(defn make-multi-remote-host+port-strategy
-  [& remote-host-strategies]
-  (strategy-multi-remote-host+port strategy-multi-remote-host+port-configs
-                                   remote-host-strategies))
+(defn make-multi-strategy
+  [& connection-strategies]
+  (strategy-multi strategy-multi-strategies connection-strategies))
+
+(defn connection-strategy->transport-configs
+  [connection-strategy]
+  (cond
+    (r/is-a? strategy-in-vm connection-strategy)
+    (let [params {"server-id" (str (strategy-in-vm-server-id connection-strategy))}
+          ^TransportConfiguration transport-cfg (TransportConfiguration. (.getName InVMConnectorFactory)
+                                                                         params)]
+      [transport-cfg])
+    
+    (r/is-a? strategy-remote-host+port connection-strategy)
+    (let [params {TransportConstants/HOST_PROP_NAME (strategy-remote-host+port-host connection-strategy)
+                  TransportConstants/PORT_PROP_NAME (strategy-remote-host+port-port connection-strategy)}
+          ^TransportConfiguration transport-cfg (TransportConfiguration. (.getName NettyConnectorFactory)
+                                                                         params)]
+      [transport-cfg])
+    
+    (r/is-a? strategy-multi connection-strategy)
+    (mapcat connection-strategy->transport-configs
+            (strategy-multi-strategies connection-strategy))))
 
 ;; Authentication credentials
 (r/def-record authentication-credentials [])
@@ -144,43 +168,20 @@
                     ActiveMQClient/DEFAULT_ACK_BATCH_SIZE)
     (.createSession client-session-factory)))
 
-(defn- create-remote-host-client-session
-  [uri credentials]
-  (let [^ServerLocator locator (ActiveMQClient/createServerLocator uri)
-        ^ClientSessionFactory factory (.createSessionFactory locator)
-        ^ClientSession client-session (create-client-session-1 factory
-                                                               credentials)]
-    (make-client-session-state client-session factory locator)))
+(defn transport-configs->server-locator
+  "Takes an ordered sequence
+  of [[org.apache.activemq.artemis.api.core.TransportConfiguration]]s and
+  returns a [[org.apache.activemq.artemis.api.core.client.ServerLocator]].
 
-(defn- create-remote-host+port-client-session
-  [host port credentials]
-  (let [params {"host" host
-                "port" port}
-        ^TransportConfiguration transport-cfg (TransportConfiguration. (.getName NettyConnectorFactory) params)
-        ^ServerLocator locator (ActiveMQClient/createServerLocatorWithoutHA (into-array [transport-cfg]))
-        ^ClientSessionFactory factory (.createSessionFactory locator)
-        ^ClientSession client-session (create-client-session-1 factory
-                                                               credentials)]
-    (make-client-session-state client-session factory locator)))
-
-;; NOTE: We make the assunmption that all host+port entries use the same
-;; credentials to connect to. Otherwise, we would need to work this out without
-;; the provided server locator. Let's see if we even need it.
-
-;; NOTE: The servers are tried in the sequence they appear in `host+port-seq`.
-(defn create-multi-remote-host+port-client-session
-  [host+port-seq credentials]
-  (let [transport-cfgs ;; TODO (Marco): Type hints.
-        (mapv (fn [host+port]
-                (TransportConfiguration. (.getName NettyConnectorFactory)
-                                         {"host" (strategy-remote-host+port-host host+port)
-                                          "port" (strategy-remote-host+port-port host+port)}))
-              host+port-seq)
-        ^ServerLocator locator (ActiveMQClient/createServerLocatorWithHA (into-array transport-cfgs))
-        ^ClientSessionFactory factory (.createSessionFactory locator)
-        ^ClientSession client-session (create-client-session-1 factory
-                                                               credentials)]
-    (make-client-session-state client-session factory locator)))
+  If `transport-configs` defines more than one connection, a high availability
+  server locator will be created, using all connections in the order they appear
+  in `transport-configs`. Otherwise, it will assume only one connection."
+  ^org.apache.activemq.artemis.api.core.client.ServerLocator
+  [transport-configs]
+  (let [transport-configs* (into-array transport-configs)]
+    (if (= 1 (count transport-configs*))
+      (ActiveMQClient/createServerLocatorWithoutHA transport-configs*)
+      (ActiveMQClient/createServerLocatorWithHA transport-configs*))))
 
 (defn create-client-session
   "Create a new [[ClientSession]] from one of the predefined strategies. Does NOT
@@ -188,22 +189,9 @@
   authentication is performed and must be a valid [[authentication-credentials]]
   map."
   [connection-strategy authentication-credentials]
-  (cond
-    (r/is-a? strategy-remote-host
-             connection-strategy)
-    (create-remote-host-client-session (strategy-remote-host-uri connection-strategy)
-                                       authentication-credentials)
-
-    (r/is-a? strategy-remote-host+port
-             connection-strategy)
-    (create-remote-host+port-client-session (strategy-remote-host+port-host connection-strategy)
-                                            (strategy-remote-host+port-port connection-strategy)
-                                            authentication-credentials)
-
-    (r/is-a? strategy-multi-remote-host+port
-             connection-strategy)
-    (create-multi-remote-host+port-client-session (strategy-multi-remote-host+port-configs connection-strategy)
-                                                  authentication-credentials)
-    
-    :else
-    (throw (UnsupportedOperationException. "not implemented"))))
+  (let [transport-configs (connection-strategy->transport-configs connection-strategy)
+        ^ServerLocator locator (transport-configs->server-locator transport-configs)
+        ^ClientSessionFactory factory (.createSessionFactory locator)
+        ^ClientSession client-session (create-client-session-1 factory
+                                                               authentication-credentials)]
+    (make-client-session-state client-session factory locator)))
